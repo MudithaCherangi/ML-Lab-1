@@ -1,0 +1,160 @@
+library(kknn)
+
+
+data <- read.csv("F:/R files/1/optdigits.csv", header=FALSE)
+
+n <- dim(data)[1]
+set.seed(12345) 
+id <- sample(1:n, floor(n * 0.5)) 
+train_data <- data[id,] 
+
+id1 <- setdiff(1:n, id)
+set.seed(12345) 
+id2 <- sample(id1, floor(n * 0.25)) 
+valid_data <- data[id2,]
+
+
+id3 <- setdiff(id1, id2)
+test_data <- data[id3,] 
+
+# Assuming the target variable is in the last column (column 65)
+colnames(train_data)[65] <- "output_col"  # Index of the last column
+
+# Train the model
+k <- 30
+model_train <- kknn(as.factor(output_col) ~ ., train_data, train_data, k = k, kernel = "rectangular")
+
+# Make predictions on training and test data
+train_preds <- model_train$fitted.values
+
+model_test <- kknn(as.factor(output_col) ~ ., train_data, test_data, k = k, kernel = "rectangular")
+
+test_preds <- model_test$fitted.values
+
+# Calculate confusion matrices
+train_confusion_matrix <- table(train_data$output_col, train_preds)
+test_confusion_matrix <- table(test_data$V65, test_preds)
+
+print(train_confusion_matrix)
+print(test_confusion_matrix)
+
+# Calculate misclassification errors
+train_error <- 1 - sum(diag(train_confusion_matrix)) / sum(train_confusion_matrix)
+test_error <- 1 - sum(diag(test_confusion_matrix)) / sum(test_confusion_matrix)
+
+# Print results
+cat("Training Misclassification Error:", train_error, "\n")
+cat("Test Misclassification Error:", test_error, "\n")
+
+
+
+# Function to calculate misclassification error
+calculate_error <- function(actual, predicted) {
+  return (1 - sum(diag(table(actual, predicted))) / sum(table(actual)))
+}
+
+# Function to fit kknn model and calculate error for different k values
+fit_kknn_and_calculate_error <- function(train_data, valid_data, k) {
+  train_errors <- numeric(length = length(k))
+  valid_errors <- numeric(length = length(k))
+  
+  for (i in seq_along(k)) {
+    model <- kknn(as.factor(output_col) ~ ., train_data, train_data, k = k[i], kernel = "rectangular")
+    train_preds <- model$fitted.values
+    
+    model_valid <- kknn(as.factor(output_col) ~ ., train_data, valid_data, k = k[i], kernel = "rectangular")
+    valid_preds <- model_valid$fitted.values
+    
+    train_errors[i] <- calculate_error(train_data$output_col, train_preds)
+    valid_errors[i] <- calculate_error(valid_data$V65, valid_preds)
+    
+    # Print the value of valid_errors[i]
+    cat("Iteration", i, "- train_errors[i]", train_errors[i], "\n")
+    # Print the value of valid_errors[i]
+    cat("Iteration", i, "- Valid Error:", valid_errors[i], "\n")
+    
+    
+  }
+  
+  return(list(train_errors = train_errors, valid_errors = valid_errors))
+  
+  
+}
+
+
+# Values of K to try
+k_values <- 1:30
+
+# Fit knn models and calculate errors
+errors <- fit_kknn_and_calculate_error(train_data, valid_data, k_values)
+
+# Plot the errors
+plot(k_values, errors$train_errors, type = "l", col = "blue", xlab = "K", ylab = "Misclassification Error", ylim = c(0, 0.2))
+lines(k_values, errors$valid_errors, type = "l", col = "red")
+legend("topright", legend = c("Training Error", "Validation Error"), col = c("blue", "red"), lty = 2)
+
+# Find the optimal K based on the validation error
+optimal_k <- k_values[which.min(errors$valid_errors)]
+cat("Optimal K:", optimal_k, "\n")
+
+# Estimate test error for the model with optimal K
+model_test_optimal_k <- kknn(as.factor(output_col) ~ ., train_data, test_data, k = optimal_k, kernel = "rectangular")
+test_preds_optimal_k <- model_test_optimal_k$fitted.values
+test_error_optimal_k <- calculate_error(test_data$V65, test_preds_optimal_k)
+
+# Print results
+cat("Training Misclassification Error (Optimal K):", errors$train_errors[which(k_values == optimal_k)], "\n")
+cat("Validation Misclassification Error (Optimal K):", errors$valid_errors[which(k_values == optimal_k)], "\n")
+cat("Test Misclassification Error (Optimal K):", test_error_optimal_k, "\n")
+
+
+
+# Function to calculate cross-entropy error
+calculate_cross_entropy <- function(actual, predicted_probs) {
+  epsilon <- 1e-15
+  
+  # Ensure predicted_probs is numeric
+  predicted_probs <- as.numeric(as.character(predicted_probs))
+  
+  # Add a small constant to avoid log(0)
+  predicted_probs <- pmax(predicted_probs, epsilon)
+  
+  # Calculate cross-entropy
+  log_probs <- -log(predicted_probs[cbind(1:length(actual), actual)])
+  return(mean(log_probs))
+}
+
+
+# Function to fit knn model and calculate cross-entropy error for different k values
+fit_kknn_and_calculate_cross_entropy <- function(train_data, valid_data, k) {
+  valid_errors <- numeric(length = length(k))
+  
+  for (i in seq_along(k)) {
+    #model_valid <- kknn(as.factor(output_col) ~ ., train_data, valid_data, k = k[i], kernel = "rectangular")
+    #valid_probs <- model_valid$probabilities
+    
+    model_valid <- kknn(as.factor(output_col) ~ ., train_data, valid_data, k = k[i], kernel = "rectangular")
+    valid_preds <- model_valid$fitted.values
+    
+    valid_errors[i] <- calculate_cross_entropy(valid_data$V65, valid_preds)
+    
+    # Print the value of valid_errors[i]
+    cat("Iteration", i, "- Valid Error:", valid_errors[i], "\n")
+  }
+  
+  return(valid_errors)
+}
+
+# Values of K to try
+k_values <- 1:30
+
+# Fit knn models and calculate cross-entropy errors
+cross_entropy_errors <- fit_kknn_and_calculate_cross_entropy(train_data, valid_data, k_values)
+
+# Plot the cross-entropy errors
+plot(k_values, cross_entropy_errors, type = "l", col = "blue", xlab = "K", ylab = "Cross-Entropy Error", ylim = c(0, max(cross_entropy_errors)))
+title(main = "Cross-Entropy Error vs. K")
+
+# Find the optimal K based on the minimum cross-entropy error
+optimal_k <- k_values[which.min(cross_entropy_errors)]
+cat("Optimal K (Cross-Entropy):", optimal_k, "\n")
